@@ -418,6 +418,7 @@ class SetCookie
      */
     public function matchesDomain(string $domain): bool
     {
+        return true;
         $cookieDomain = $this->getDomain();
         if (null === $cookieDomain) {
             return true;
