@@ -1,0 +1,155 @@
+@php
+    $direction = 'ltr';
+    $locale = app()->getLocale();
+    
+    // Check for RTL languages - Arabic and Hebrew always use RTL
+    if (in_array($locale, ['ar', 'he'])) {
+        $direction = 'rtl';
+    } else {
+        // For non-RTL languages, check user layout setting
+        if (auth()->check()) {
+            $userDirection = getSetting('layoutDirection', 'left');
+            if ($userDirection === 'right') {
+                $direction = 'rtl';
+            } elseif ($userDirection === 'left') {
+                $direction = 'ltr';
+            }
+        }
+    }
+@endphp
+<!DOCTYPE html>
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" dir="{{ $direction }}" @class(['dark' => ($appearance ?? 'system') == 'dark'])>
+    <head>
+        <base href="{{ \Illuminate\Support\Facades\Request::getBasePath() }}">
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="csrf-token" content="{{ csrf_token() }}">
+
+        {{-- Inline script to detect system dark mode preference and apply it immediately --}}
+        <script>
+            (function() {
+                const appearance = '{{ $appearance ?? "system" }}';
+
+                if (appearance === 'system') {
+                    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+                    if (prefersDark) {
+                        document.documentElement.classList.add('dark');
+                    }
+                }
+            })();
+        </script>
+
+        {{-- Inline style to set the HTML background color based on our theme in app.css --}}
+        <style>
+            html {
+                background-color: oklch(1 0 0);
+            }
+
+            html.dark {
+                background-color: oklch(0.145 0 0);
+            }
+        </style>
+
+        <title inertia>{{ config('app.name', 'Laravel') }}</title>
+        
+        {{-- SEO Meta Tags --}}
+        @php
+            $seoSettings = settings();
+        @endphp
+        <!-- Debug: {{ json_encode($seoSettings) }} -->
+        @if(!empty($seoSettings['metaKeywords']))
+            <meta name="keywords" content="{{ $seoSettings['metaKeywords'] }}">
+        @endif
+        @if(!empty($seoSettings['metaDescription']))
+            <meta name="description" content="{{ $seoSettings['metaDescription'] }}">
+        @endif
+        @if(!empty($seoSettings['metaImage']))
+            <meta property="og:image" content="{{ str_starts_with($seoSettings['metaImage'], 'http') ? $seoSettings['metaImage'] : url($seoSettings['metaImage']) }}">
+        @endif
+        <meta property="og:title" content="{{ config('app.name', 'Laravel') }}">
+        <meta property="og:type" content="website">
+        <meta name="twitter:card" content="summary_large_image">
+
+        <link rel="preconnect" href="https://fonts.bunny.net">
+        <link href="https://fonts.bunny.net/css?family=instrument-sans:400,500,600" rel="stylesheet" />
+        <script src="{{ asset('js/jquery.min.js') }}"></script>
+        @routes
+        @if (app()->environment('local') && file_exists(public_path('hot')))
+            @viteReactRefresh
+        @endif
+        @vite(['resources/js/app.tsx'])
+        <script>
+            window.baseUrl = '{{ url('/') }}';
+
+            // Set initial locale for i18next
+            fetch('{{ route('initial-locale') }}')
+                .then(response => response.text())
+                .then(locale => {
+                    window.initialLocale = locale;
+                })
+                .catch(() => {
+                    window.initialLocale = 'en';
+                });
+            
+            // Apply global sidebar and layout settings
+            window.addEventListener('DOMContentLoaded', function() {
+                @if(config('app.is_demo'))
+                    // Demo mode: Get settings from cookies
+                    function getCookie(name) {
+                        const value = `; ${document.cookie}`;
+                        const parts = value.split(`; ${name}=`);
+                        if (parts.length === 2) return decodeURIComponent(parts.pop().split(';').shift());
+                        return null;
+                    }
+                    
+                    const brandCookie = getCookie('brandSettings');
+                    let globalSettings = {};
+                    
+                    if (brandCookie) {
+                        try {
+                            globalSettings = JSON.parse(brandCookie);
+                        } catch (e) {
+                            console.error('Failed to parse brand settings cookie');
+                        }
+                    }
+                @else
+                    // Normal mode: Get settings from database
+                    @php
+                        $user = auth()->user();
+                        $currentSettings = [];
+                        if ($user && $user->current_workspace_id && isSaasMode()) {
+                            $workspace = $user->currentWorkspace;
+                            if ($workspace && $workspace->owner_id) {
+                                $currentSettings = settings($workspace->owner_id, $user->current_workspace_id);
+                            } else {
+                                $currentSettings = settings($user->id, $user->current_workspace_id);
+                            }
+                        } else {
+                            $currentSettings = settings();
+                        }
+                    @endphp
+                    
+                    const globalSettings = @json($currentSettings);
+                @endif
+                
+                if (globalSettings.sidebarVariant || globalSettings.sidebarStyle) {
+                    const sidebarSettings = {
+                        variant: globalSettings.sidebarVariant || 'inset',
+                        style: globalSettings.sidebarStyle || 'plain',
+                        collapsible: JSON.parse(localStorage.getItem('sidebarSettings') || '{}').collapsible || 'icon'
+                    };
+                    localStorage.setItem('sidebarSettings', JSON.stringify(sidebarSettings));
+                }
+                
+                if (globalSettings.layoutDirection) {
+                    localStorage.setItem('layoutPosition', globalSettings.layoutDirection);
+                }
+            });
+        </script>
+        @inertiaHead
+    </head>
+    <body class="font-sans antialiased">
+        @inertia
+    </body>
+</html>
